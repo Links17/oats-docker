@@ -32,10 +32,7 @@ func RunUpdatesWithNotifications(filter t.Filter) {
 		IncludeRestarting: false,
 		WarnOnHeadFailed:  container.WarningStrategy(""),
 	})
-	info := t.TagInfo{
-		"jolly_sanderson",
-		"nginx:1.25.1-alpine",
-	}
+	info := t.TagInfo{}
 	UpdateTags := []t.TagInfo{info}
 	client = container.NewClient(container.ClientOptions{
 		IncludeStopped:    false,
@@ -67,8 +64,36 @@ func RunUpdatesWithNotifications(filter t.Filter) {
 func CreateContainer() {
 
 	const test_service = `{
-
+    "image": "mysteriumnetwork/myst:latest",
+    "container_name": "sensecap-myst",
+    "cap_add": [
+        "NET_ADMIN"
+    ],
+    "command": "--vendor.id=Seeed service --agreed-terms-and-conditions",
+    "ports": [
+        "4449:4449"
+    ],
+    "environment": [
+        "VERSION=1.29.3"
+    ],
+    "volumes": [
+        "myst-data:/var/lib/mysterium-node"
+    ],
+    "restart": "always",
+    "privileged": false,
+    "network_mode": "bridge",
+    "labels": {
+		"sensecap_system":"true"
+	},
+    "stop_signal": "SIGINT"
 }`
+	client = container.NewClient(container.ClientOptions{
+		IncludeStopped:    false,
+		ReviveStopped:     false,
+		RemoveVolumes:     false,
+		IncludeRestarting: false,
+		WarnOnHeadFailed:  container.WarningStrategy(""),
+	})
 
 	config, err := factory.ConvertJSONToDockerConfig(test_service)
 	fmt.Println(err)
@@ -91,4 +116,36 @@ func Find() {
 	name, err := client.GetContainerByName("laughing_mcnuly")
 	fmt.Println(name)
 	fmt.Println(err)
+}
+
+func UpdateEnv() {
+	client = container.NewClient(container.ClientOptions{
+		IncludeStopped:    false,
+		ReviveStopped:     false,
+		RemoveVolumes:     false,
+		IncludeRestarting: false,
+		WarnOnHeadFailed:  container.WarningStrategy(""),
+	})
+	updateParams := t.UpdateParams{
+		Cleanup:         true,
+		NoRestart:       false,
+		Timeout:         10,
+		MonitorOnly:     false,
+		LifecycleHooks:  false,
+		RollingRestart:  false,
+		LabelPrecedence: false,
+		NoPull:          false,
+		UpdateEnv: []string{
+			"VERSION=1.29.4",
+		},
+	}
+	containers, err := client.ListContainers()
+	if err != nil {
+		fmt.Errorf("update Env failed %v", err)
+		return
+	}
+
+	restart := actions.UpdateEnv(containers, client, updateParams)
+
+	fmt.Println(restart)
 }

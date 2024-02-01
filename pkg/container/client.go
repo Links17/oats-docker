@@ -29,6 +29,7 @@ type Client interface {
 	ListContainers() ([]t.Container, error)
 	GetContainer(containerID t.ContainerID) (t.Container, error)
 	StopContainer(t.Container, time.Duration) error
+	RemoveContainer(t.Container, time.Duration) error
 	StartContainer(t.Container) (t.ContainerID, error)
 	RenameContainer(t.Container, string) error
 	IsContainerStale(t.Container, t.UpdateParams) (stale bool, latestImage t.ImageID, err error)
@@ -192,6 +193,42 @@ func (client dockerClient) GetContainerByName(name string) (*types.Container, er
 		return &types.Container{}, fmt.Errorf("not found")
 	}
 	return &containers[0], nil
+}
+
+func (client dockerClient) RemoveContainer(c t.Container, timeout time.Duration) error {
+	bg := context.Background()
+	signal := c.StopSignal()
+	if signal == "" {
+		signal = defaultStopSignal
+	}
+
+	idStr := string(c.ID())
+	shortID := c.ID().ShortID()
+
+	if c.IsRunning() {
+		log.Infof("Stopping %s (%s) with %s", c.Name(), shortID, signal)
+		if err := client.api.ContainerKill(bg, idStr, signal); err != nil {
+			return err
+		}
+	}
+
+	// TODO: This should probably be checked.
+	_ = client.waitForStopOrTimeout(c, timeout)
+
+	if err := client.api.ContainerRemove(bg, idStr, types.ContainerRemoveOptions{Force: true, RemoveVolumes: false}); err != nil {
+		if sdkClient.IsErrNotFound(err) {
+			log.Debugf("Container %s not found, skipping removal.", shortID)
+			return nil
+		}
+		return err
+	}
+
+	// Wait for container to be removed. In this case an error is a good thing
+	if err := client.waitForStopOrTimeout(c, timeout); err == nil {
+		return fmt.Errorf("container %s (%s) could not be removed", c.Name(), shortID)
+	}
+
+	return nil
 }
 
 func (client dockerClient) StopContainer(c t.Container, timeout time.Duration) error {

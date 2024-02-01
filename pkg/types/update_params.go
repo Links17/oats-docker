@@ -16,6 +16,7 @@ type UpdateParams struct {
 	RollingRestart  bool
 	LabelPrecedence bool
 	UpdateTags      []TagInfo
+	UpdateEnv       []string
 }
 
 type TagInfo struct {

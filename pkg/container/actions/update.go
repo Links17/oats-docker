@@ -2,14 +2,15 @@ package actions
 
 import (
 	"errors"
+	"fmt"
+	log "github.com/sirupsen/logrus"
 	"oats-docker/pkg/container"
 	"oats-docker/pkg/container/lifecycle"
 	"oats-docker/pkg/container/session"
 	"oats-docker/pkg/container/sorter"
 	"oats-docker/pkg/types"
 	"oats-docker/pkg/util"
-
-	log "github.com/sirupsen/logrus"
+	"strings"
 )
 
 // Update looks at the running Docker containers to see if any of the images
@@ -92,7 +93,7 @@ func Update(client container.Client, params types.UpdateParams) (types.Report, e
 	}
 
 	if params.RollingRestart {
-		progress.UpdateFailed(performRollingRestart(containersToUpdate, client, params))
+		progress.UpdateFailed(PerformRollingRestart(containersToUpdate, client, params))
 	} else {
 		failedStop, stoppedImages := stopContainersInReversedOrder(containersToUpdate, client, params)
 		progress.UpdateFailed(failedStop)
@@ -106,7 +107,7 @@ func Update(client container.Client, params types.UpdateParams) (types.Report, e
 	return progress.Report(), nil
 }
 
-func performRollingRestart(containers []types.Container, client container.Client, params types.UpdateParams) map[types.ContainerID]error {
+func PerformRollingRestart(containers []types.Container, client container.Client, params types.UpdateParams) map[types.ContainerID]error {
 	cleanupImageIDs := make(map[types.ImageID]bool, len(containers))
 	failed := make(map[types.ContainerID]error, len(containers))
 
@@ -123,6 +124,25 @@ func performRollingRestart(containers []types.Container, client container.Client
 					cleanupImageIDs[containers[i].ImageID()] = true
 				}
 			}
+		}
+	}
+
+	if params.Cleanup {
+		cleanupImages(client, cleanupImageIDs)
+	}
+	return failed
+}
+
+func UpdateEnv(containers []types.Container, client container.Client, params types.UpdateParams) map[types.ContainerID]error {
+	cleanupImageIDs := make(map[types.ImageID]bool, len(containers))
+	failed := make(map[types.ContainerID]error, len(containers))
+
+	for i := len(containers) - 1; i >= 0; i-- {
+		if err := updateContainer(containers[i], client, params); err != nil {
+			failed[containers[i].ID()] = err
+		} else if containers[i].IsStale() {
+			// Only add (previously) stale containers' images to clean up
+			cleanupImageIDs[containers[i].ImageID()] = true
 		}
 	}
 
@@ -231,7 +251,6 @@ func restartStaleContainer(container types.Container, client container.Client, p
 			return nil
 		}
 	}
-
 	if !params.NoRestart {
 		if newContainerID, err := client.StartContainer(container); err != nil {
 			log.Error(err)
@@ -241,6 +260,70 @@ func restartStaleContainer(container types.Container, client container.Client, p
 		}
 	}
 	return nil
+}
+
+func updateContainer(container types.Container, client container.Client, params types.UpdateParams) error {
+	// Since we can't shutdown a watchtower container immediately, we need to
+	// start the new one while the old one is still running. This prevents us
+	// from re-using the same container name so we first rename the current
+	// instance so that the new one can adopt the old name.
+	if container.IsWatchtower() {
+		if err := client.RenameContainer(container, util.RandName()); err != nil {
+			log.Error(err)
+			return nil
+		}
+	}
+	check := CheckEnv(container, params)
+	if check && !params.NoRestart {
+		if err := client.RemoveContainer(container, params.Timeout); err != nil {
+			log.Error(err)
+			return err
+		}
+		if newContainerID, err := client.StartContainer(container); err != nil {
+			log.Error(err)
+			return err
+		} else if container.ToRestart() && params.LifecycleHooks {
+			lifecycle.ExecutePostUpdateCommand(client, newContainerID)
+		}
+	}
+	return nil
+}
+
+// CheckEnv checkEnv update value and update status
+func CheckEnv(container types.Container, params types.UpdateParams) bool {
+	existingEnv := make(map[string]bool)
+	changed := false
+
+	for i, env := range container.ContainerInfo().Config.Env {
+		existingEnv[env] = true
+		for _, updateEnv := range params.UpdateEnv {
+			u := strings.Split(updateEnv, "=")
+			fmt.Println(u)
+			e := strings.Split(env, "=")
+			fmt.Println(e)
+			if len(u) > 1 && len(e) > 1 && strings.HasPrefix(u[0], e[0]) && !strings.HasPrefix(u[1], e[1]) {
+				container.ContainerInfo().Config.Env[i] = updateEnv
+				existingEnv[updateEnv] = true
+				changed = true
+				break
+			}
+			if len(u) == 1 && len(e) > 1 && strings.HasPrefix(u[0], e[0]) {
+				container.ContainerInfo().Config.Env = append(container.ContainerInfo().Config.Env[:i], container.ContainerInfo().Config.Env[i+1:]...)
+				changed = true
+				break
+			}
+		}
+	}
+
+	for _, updateEnv := range params.UpdateEnv {
+		i := len(strings.Split(updateEnv, "="))
+		if !existingEnv[updateEnv] && i != 1 {
+			container.ContainerInfo().Config.Env = append(container.ContainerInfo().Config.Env, updateEnv)
+			existingEnv[updateEnv] = true
+			changed = true
+		}
+	}
+	return changed
 }
 
 // UpdateImplicitRestart iterates through the passed containers, setting the

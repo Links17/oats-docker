@@ -9,7 +9,7 @@ import (
 )
 
 const test_service = `{
-
+    
 }`
 
 /*// 准备容器配置
@@ -55,4 +55,8 @@ func TestConfig(t *testing.T) {
 
 func TestGetContainer(t *testing.T) {
 	pkg.Find()
+}
+
+func TestUpdateEnc(t *testing.T) {
+	pkg.UpdateEnv()
 }
