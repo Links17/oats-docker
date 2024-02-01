@@ -11,6 +11,10 @@ import (
 )
 
 func CheckContainerPort(hostConfig *container.HostConfig) bool {
+
+	if len(hostConfig.PortBindings) == 0 {
+		return true
+	}
 	for port, bindings := range hostConfig.PortBindings {
 		for _, binding := range bindings {
 			hostIP := binding.HostIP
@@ -19,7 +23,7 @@ func CheckContainerPort(hostConfig *container.HostConfig) bool {
 			}
 			fmt.Println(port.Proto(), hostIP, binding.HostPort)
 			open := IsHostPortOpen(port.Proto(), hostIP, binding.HostPort)
-			if !open {
+			if open {
 				return open
 			}
 		}
@@ -33,12 +37,14 @@ func IsHostPortOpen(protocol, hostIP, hostPort string) bool {
 	var err error
 	if protocol == "tcp" {
 		listener, err = net.Listen("tcp", net.JoinHostPort(hostIP, hostPort))
+		fmt.Println(err)
 		if err != nil {
 			return false
 		}
 	} else if protocol == "udp" {
 		sadd, err := net.ResolveUDPAddr("udp", hostIP)
 		_, err = net.ListenUDP("udp", sadd)
+		fmt.Println(err)
 		if err != nil {
 			return false
 		}

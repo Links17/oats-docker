@@ -119,7 +119,7 @@ func performRollingRestart(containers []types.Container, client container.Client
 				if err := restartStaleContainer(containers[i], client, params); err != nil {
 					failed[containers[i].ID()] = err
 				} else if containers[i].IsStale() {
-					// Only add (previously) stale containers' images to cleanup
+					// Only add (previously) stale containers' images to clean up
 					cleanupImageIDs[containers[i].ImageID()] = true
 				}
 			}

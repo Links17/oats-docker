@@ -1,9 +1,11 @@
 package pkg
 
 import (
+	"fmt"
 	log "github.com/sirupsen/logrus"
 	"oats-docker/pkg/container"
 	"oats-docker/pkg/container/actions"
+	"oats-docker/pkg/container/factory"
 	t "oats-docker/pkg/types"
 	"time"
 )
@@ -35,7 +37,13 @@ func RunUpdatesWithNotifications(filter t.Filter) {
 		"nginx:1.25.1-alpine",
 	}
 	UpdateTags := []t.TagInfo{info}
-
+	client = container.NewClient(container.ClientOptions{
+		IncludeStopped:    false,
+		ReviveStopped:     false,
+		RemoveVolumes:     false,
+		IncludeRestarting: false,
+		WarnOnHeadFailed:  container.WarningStrategy(""),
+	})
 	updateParams := t.UpdateParams{
 		Filter:          filter,
 		Cleanup:         true,
@@ -57,6 +65,22 @@ func RunUpdatesWithNotifications(filter t.Filter) {
 }
 
 func CreateContainer() {
+
+	const test_service = `{
+
+}`
+
+	config, err := factory.ConvertJSONToDockerConfig(test_service)
+	fmt.Println(err)
+	fmt.Println(config)
+	containerConfig, networkingConfig, hostConfig := factory.GenerateContainerConfig(config)
+	err = actions.Create(client, containerConfig, networkingConfig, hostConfig)
+	if err != nil {
+		println(err)
+	}
+}
+
+func Find() {
 	client = container.NewClient(container.ClientOptions{
 		IncludeStopped:    false,
 		ReviveStopped:     false,
@@ -64,8 +88,7 @@ func CreateContainer() {
 		IncludeRestarting: false,
 		WarnOnHeadFailed:  container.WarningStrategy(""),
 	})
-	err := actions.Create(client)
-	if err != nil {
-		println(err)
-	}
+	name, err := client.GetContainerByName("laughing_mcnuly")
+	fmt.Println(name)
+	fmt.Println(err)
 }
